@@ -1,9 +1,8 @@
 {
-  "name": "api",
-  "$schema": "../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "api/src",
+  "name": "image-processor",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/image-processor/src",
   "projectType": "application",
-  "tags": [],
   "targets": {
     "build": {
       "executor": "@nx/esbuild:esbuild",
@@ -11,12 +10,13 @@
       "defaultConfiguration": "production",
       "options": {
         "platform": "node",
-        "outputPath": "dist/api",
+        "outputPath": "dist/packages/image-processor",
         "format": ["cjs"],
-        "bundle": false,
-        "main": "api/src/main.ts",
-        "tsConfig": "api/tsconfig.app.json",
-        "assets": ["api/src/assets"],
+        "bundle": true,
+        "external": ["sharp"],
+        "main": "packages/image-processor/src/main.ts",
+        "tsConfig": "packages/image-processor/tsconfig.app.json",
+        "assets": ["packages/image-processor/src/assets"],
         "esbuildOptions": {
           "sourcemap": true,
           "outExtension": {
@@ -41,8 +41,8 @@
       "cache": true,
       "executor": "@nx/js:prune-lockfile",
       "outputs": [
-        "{workspaceRoot}/dist/api/package.json",
-        "{workspaceRoot}/dist/api/pnpm-lock.yaml"
+        "{workspaceRoot}/dist/packages/image-processor/package.json",
+        "{workspaceRoot}/dist/packages/image-processor/pnpm-lock.yaml"
       ],
       "options": {
         "buildTarget": "build"
@@ -51,7 +51,9 @@
     "copy-workspace-modules": {
       "dependsOn": ["build"],
       "cache": true,
-      "outputs": ["{workspaceRoot}/dist/api/workspace_modules"],
+      "outputs": [
+        "{workspaceRoot}/dist/packages/image-processor/workspace_modules"
+      ],
       "executor": "@nx/js:copy-workspace-modules",
       "options": {
         "buildTarget": "build"
@@ -61,28 +63,38 @@
       "dependsOn": ["prune-lockfile", "copy-workspace-modules"],
       "executor": "nx:noop"
     },
+    "package": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/image-processor.zip"],
+      "options": {
+        "parallel": false,
+        "commands": [
+          "echo '{\"dependencies\":{\"sharp\":\"^0.34.2\"}}' > dist/packages/image-processor/package.json",
+          "npm install --prefix dist/packages/image-processor --cpu=x64 --os=linux sharp --no-package-lock",
+          "cd dist/packages/image-processor && zip -r ../image-processor.zip ."
+        ]
+      }
+    },
     "serve": {
       "continuous": true,
       "executor": "@nx/js:node",
       "defaultConfiguration": "development",
       "dependsOn": ["build"],
       "options": {
-        "buildTarget": "api:build",
+        "buildTarget": "image-processor:build",
         "runBuildTargetDependencies": false
       },
       "configurations": {
         "development": {
-          "buildTarget": "api:build:development"
+          "buildTarget": "image-processor:build:development"
         },
         "production": {
-          "buildTarget": "api:build:production"
+          "buildTarget": "image-processor:build:production"
         }
       }
-    },
-    "test": {
-      "options": {
-        "passWithNoTests": true
-      }
     }
-  }
+  },
+  "tags": []
 }
