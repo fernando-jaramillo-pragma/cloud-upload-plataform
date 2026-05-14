@@ -1,0 +1,108 @@
+<div class="upload-container">
+  <!-- Alertas Inline -->
+  @if (errorMessage()) {
+  <div class="alert alert-error">
+    <img src="/svg/warning.svg" class="alert-icon" alt="" />
+    <span>{{ errorMessage() }}</span>
+  </div>
+  } @if (successMessage()) {
+  <div class="alert alert-success">
+    <img src="/svg/check.svg" class="alert-icon" alt="" />
+    <span>{{ successMessage() }}</span>
+  </div>
+  }
+
+  <!-- Input File -->
+  <div class="input-wrapper">
+    <input
+      id="fileInput"
+      type="file"
+      accept="image/*"
+      (change)="onSelectFile($event)"
+      class="file-input"
+    />
+    <label for="fileInput" class="input-label">
+      <img src="/svg/image.svg" class="upload-icon" alt="" />
+      <span>Selecciona una imagen</span>
+      <small>Máximo 1MB</small>
+    </label>
+  </div>
+
+  <!-- Preview con Skeleton -->
+  @if (previewUrl() || isLoading()) {
+  <div class="preview">
+    @if (isLoading()) {
+    <div class="skeleton"></div>
+    } @else {
+    <img [src]="previewUrl()" alt="Preview" />
+    }
+  </div>
+  }
+
+  <!-- Botón Guardar -->
+  @if (previewUrl() && !isLoading()) {
+  <button
+    (click)="uploadImage()"
+    [disabled]="!selectedFile() || isUploading()"
+    class="btn-upload"
+  >
+    @if (!isUploading()) {
+    <img src="/svg/save.svg" class="btn-icon" alt="" />
+    <span>Guardar Imagen</span>
+    } @else {
+    <span class="btn-loading">
+      <span class="spinner"></span>
+      <span>Guardando...</span>
+    </span>
+    }
+  </button>
+  }
+
+  <!-- Resultado: thumbnail generado por la Lambda -->
+  @if (recentUploads().length > 0) {
+  <div class="gallery">
+    <p class="gallery-title">Últimas imágenes procesadas (Lambda + R2)</p>
+    <div class="gallery-grid">
+      @for (item of recentUploads(); track item.thumbnailUrl) {
+      <button
+        type="button"
+        class="gallery-item"
+        (click)="openModal(item.processedUrl)"
+      >
+        <img [src]="item.thumbnailUrl" alt="Imagen procesada" />
+      </button>
+      }
+    </div>
+  </div>
+  }
+</div>
+
+<!-- Modal imagen procesada -->
+@if (modalImageUrl()) {
+<div
+  class="modal-backdrop"
+  (click)="closeModal()"
+  (keydown.escape)="closeModal()"
+  role="dialog"
+  aria-modal="true"
+  tabindex="0"
+>
+  <div
+    class="modal-content"
+    (click)="$event.stopPropagation()"
+    (keydown)="$event.stopPropagation()"
+    tabindex="-1"
+  >
+    <button
+      type="button"
+      class="modal-close"
+      (click)="closeModal()"
+      (keydown.enter)="closeModal()"
+      aria-label="Cerrar"
+    >
+      <img src="/svg/close.svg" alt="Cerrar" class="close-icon" />
+    </button>
+    <img [src]="modalImageUrl()!" alt="Imagen procesada en R2" />
+  </div>
+</div>
+}
