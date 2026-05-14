@@ -15,10 +15,6 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "es2022",
-    "customConditions": ["@org/source"],
-    "paths": {
-      "@org/models": ["./shared/models/src/index.ts"],
-      "@org/upload": ["./features/upload/src/index.ts"]
-    }
+    "customConditions": ["@org/source"]
   }
 }
