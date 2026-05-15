@@ -3,7 +3,7 @@ import { createHash } from 'crypto';
 import type { ImageUploadPayload, LambdaResponse } from '@org/models';
 import { validateImage } from './lib/validator.js';
 import { processImage } from './lib/processor.js';
-import { uploadToR2, existsInR2 } from './lib/r2-uploader.js';
+import { uploadToR2, existsInR2, getR2PublicUrl } from './lib/r2-uploader.js';
 
 /**
  * AWS Lambda Handler — Procesador de imágenes
@@ -42,16 +42,16 @@ export const handler: Handler<ImageUploadPayload, LambdaResponse> = async (
       console.log(
         `Imagen duplicada detectada (hash: ${hash}), devolviendo URLs existentes`,
       );
-      const R2_PUBLIC_URL = process.env['R2_PUBLIC_URL'] ?? '';
+      const publicUrl = await getR2PublicUrl();
       return {
         statusCode: 200,
         body: {
           originalKey,
-          originalUrl: `${R2_PUBLIC_URL}/${originalKey}`,
+          originalUrl: `${publicUrl}/${originalKey}`,
           processedKey,
           thumbnailKey,
-          processedUrl: `${R2_PUBLIC_URL}/${processedKey}`,
-          thumbnailUrl: `${R2_PUBLIC_URL}/${thumbnailKey}`,
+          processedUrl: `${publicUrl}/${processedKey}`,
+          thumbnailUrl: `${publicUrl}/${thumbnailKey}`,
           originalFilename: filename,
           width: 0,
           height: 0,
