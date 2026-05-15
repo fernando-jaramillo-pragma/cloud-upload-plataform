@@ -2,5 +2,24 @@
   "extends": "./tsconfig.base.json",
   "compileOnSave": false,
   "files": [],
-  "references": []
+  "references": [
+    {
+      "path": "./packages/image-processor"
+    },
+    {
+      "path": "./features/upload"
+    },
+    {
+      "path": "./shared/models"
+    },
+    {
+      "path": "./web-e2e"
+    },
+    {
+      "path": "./api"
+    },
+    {
+      "path": "./web"
+    }
+  ]
 }
