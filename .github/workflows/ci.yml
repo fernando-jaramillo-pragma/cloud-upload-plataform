@@ -19,13 +19,18 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
+      # Install pnpm
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       # Cache node_modules
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: 'pnpm'
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
-      - run: npx nx format:check --base="remotes/origin/main"
-      - run: npx nx run-many -t lint test build typecheck e2e-ci
+      - run: pnpm nx format:check --base="remotes/origin/main"
+      - run: pnpm nx run-many -t lint test build typecheck e2e-ci
