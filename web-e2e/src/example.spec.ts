@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-test('has title', async ({ page }) => {
+test('has upload form', async ({ page }) => {
   await page.goto('/');
 
-  // Expect h1 to contain a substring.
-  expect(await page.locator('h1').innerText()).toContain('Welcome');
+  // Expect the upload label to be visible
+  await expect(page.locator('label.input-label')).toContainText(
+    'Selecciona una imagen',
+  );
 });
