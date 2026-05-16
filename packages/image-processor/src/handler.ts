@@ -11,8 +11,8 @@ import { uploadToR2, existsInR2, getR2PublicUrl } from './lib/r2-uploader.js';
  * Flujo:
  *  1. Recibe la imagen en base64 desde la API Express.
  *  2. Valida formato y dimensiones.
- *  3. Redimensiona, aplica grayscale y genera thumbnail con sharp.
- *  4. Sube imagen procesada y thumbnail a Cloudflare R2.
+ *  3. Comprime el original (q90), escala a 9:16 (1080×1920) y genera thumbnail 9:16 (270×480).
+ *  4. Sube original, procesada y thumbnail a Cloudflare R2.
  *  5. Retorna las URLs públicas.
  */
 export const handler: Handler<ImageUploadPayload, LambdaResponse> = async (
@@ -68,14 +68,15 @@ export const handler: Handler<ImageUploadPayload, LambdaResponse> = async (
       };
     }
 
-    // 5. Procesar: resize + grayscale + thumbnail
-    const { processed, thumbnail, width, height } = await processImage(buffer);
+    // 5. Comprimir original, escalar a 9:16 y generar thumbnail de la procesada
+    const { original, processed, thumbnail, width, height } =
+      await processImage(buffer);
 
     const metadata = { 'original-filename': filename };
 
-    // 6. Subir original, procesada y thumbnail a R2 en paralelo
+    // 6. Subir original (comprimido), procesada y thumbnail a R2 en paralelo
     const [originalUrl, processedUrl, thumbnailUrl] = await Promise.all([
-      uploadToR2(originalKey, buffer, mimetype, metadata),
+      uploadToR2(originalKey, original, 'image/jpeg', metadata),
       uploadToR2(processedKey, processed, 'image/jpeg', metadata),
       uploadToR2(thumbnailKey, thumbnail, 'image/jpeg', metadata),
     ]);

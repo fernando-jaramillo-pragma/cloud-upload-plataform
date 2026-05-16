@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import sharp from 'sharp';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import type {
@@ -23,8 +24,8 @@ const R2_SECRET_ACCESS_KEY = process.env['R2_SECRET_ACCESS_KEY'] ?? '';
 const R2_BUCKET_NAME = process.env['R2_BUCKET_NAME'] ?? '';
 const R2_PUBLIC_URL = process.env['R2_PUBLIC_URL'] ?? '';
 
-// Tamaño máximo de upload en MB (default: 5MB)
-const UPLOAD_MAX_SIZE_MB = Number(process.env['UPLOAD_MAX_SIZE_MB'] ?? 5);
+// Tamaño máximo de upload en MB (default: 10MB — cubre fotos de iPhone)
+const UPLOAD_MAX_SIZE_MB = Number(process.env['UPLOAD_MAX_SIZE_MB'] ?? 10);
 
 // Configuración de Express
 const app = express();
@@ -135,12 +136,23 @@ app.post(
     }
 
     /**
+     * Pre-comprimir la imagen antes de enviar a Lambda.
+     * Lambda tiene un límite de 6MB para invocaciones síncronas.
+     * Reducimos a max 2000px y JPEG q85 para que el payload base64 quede bajo ~4MB.
+     */
+    const preCompressed = await sharp(req.file.buffer)
+      .rotate() // corrige orientación EXIF (fotos iPhone rotadas)
+      .resize(2000, 2000, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+
+    /**
      * Construimos el payload que se enviará a la Lambda. La Lambda espera un objeto con la imagen en base64, el nombre original del archivo y su tipo MIME. Convertimos el buffer de la imagen a una cadena base64 para incluirlo en el payload JSON.
      */
     const payload: ImageUploadPayload = {
-      imageBase64: req.file.buffer.toString('base64'),
+      imageBase64: preCompressed.toString('base64'),
       filename: req.file.originalname,
-      mimetype: req.file.mimetype,
+      mimetype: 'image/jpeg',
     };
 
     try {

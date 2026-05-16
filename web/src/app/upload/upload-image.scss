@@ -198,7 +198,7 @@
 
     .gallery-grid {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 0.5rem;
     }
 
@@ -219,7 +219,7 @@
 
       img {
         width: 100%;
-        aspect-ratio: 1;
+        aspect-ratio: 9/16;
         object-fit: cover;
         display: block;
         animation: fadeIn 0.3s ease-out;

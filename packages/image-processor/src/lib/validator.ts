@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 
 const ALLOWED_MIMETYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const MAX_PIXELS = 10_000_000; // 10 MP
+const MAX_PIXELS = 25_000_000; // 25 MP — cubre iPhone 12/13/14/15 y cámaras Android modernas
 
 export interface ValidationResult {
   valid: boolean;
