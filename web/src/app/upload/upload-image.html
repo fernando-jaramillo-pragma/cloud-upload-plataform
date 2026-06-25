@@ -1,14 +1,19 @@
 <div class="upload-container">
-  <!-- Alertas Inline -->
-  @if (errorMessage()) {
-  <div class="alert alert-error">
-    <img src="/svg/warning.svg" class="alert-icon" alt="" />
-    <span>{{ errorMessage() }}</span>
-  </div>
-  } @if (successMessage()) {
-  <div class="alert alert-success">
-    <img src="/svg/check.svg" class="alert-icon" alt="" />
-    <span>{{ successMessage() }}</span>
+  <!-- Alerta unica (error / success / deleted) -->
+  @if (alert(); as a) {
+  <div class="alert alert-{{ a.type }}">
+    @switch (a.type) {
+      @case ('error') {
+        <img src="/svg/warning.svg" class="alert-icon" alt="" />
+      }
+      @case ('success') {
+        <img src="/svg/check.svg" class="alert-icon" alt="" />
+      }
+      @case ('deleted') {
+        <img src="/svg/trash.svg" class="alert-icon" alt="" />
+      }
+    }
+    <span>{{ a.message }}</span>
   </div>
   }
 
@@ -61,16 +66,34 @@
   <!-- Resultado: thumbnail generado por la Lambda -->
   @if (recentUploads().length > 0) {
   <div class="gallery">
-    <p class="gallery-title">Últimas imágenes procesadas (Lambda + R2)</p>
+    <p class="gallery-title">Ultimas imagenes procesadas (Lambda + R2)</p>
     <div class="gallery-grid">
-      @for (item of recentUploads(); track item.thumbnailUrl) {
-      <button
-        type="button"
-        class="gallery-item"
-        (click)="openModal(item.processedUrl)"
-      >
-        <img [src]="item.thumbnailUrl" alt="Imagen procesada" />
-      </button>
+      @for (item of recentUploads(); track item.key) {
+      <div class="gallery-item-wrapper">
+        <!-- Miniatura (abre modal) -->
+        <button
+          type="button"
+          class="gallery-item"
+          (click)="openModal(item.processedUrl)"
+        >
+          <img [src]="item.thumbnailUrl" alt="Imagen procesada" />
+        </button>
+
+        <!-- Boton eliminar (visible al hacer hover) - esquina inferior izquierda -->
+        <button
+          type="button"
+          class="gallery-delete"
+          [class.deleting]="deletingKey() === item.key"
+          (click)="$event.stopPropagation(); deleteImage(item.key)"
+          aria-label="Eliminar imagen"
+        >
+          @if (deletingKey() === item.key) {
+            <span class="spinner spinner-sm"></span>
+          } @else {
+            <img src="/svg/trash.svg" class="delete-icon" alt="" />
+          }
+        </button>
+      </div>
       }
     </div>
   </div>

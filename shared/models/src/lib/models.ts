@@ -32,6 +32,8 @@ export interface ImageProcessResult {
 
 /** Item de la galería devuelto por GET /uploads */
 export interface ThumbnailItem {
+  /** UUID del recurso — se usa para construir la URL del endpoint DELETE */
+  key: string;
   thumbnailUrl: string;
   processedUrl: string;
   uploadedAt: string;

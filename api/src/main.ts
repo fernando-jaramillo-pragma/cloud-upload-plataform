@@ -3,7 +3,11 @@ import cors from 'cors';
 import multer from 'multer';
 import sharp from 'sharp';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+} from '@aws-sdk/client-s3';
 import type {
   ImageUploadPayload,
   LambdaResponse,
@@ -104,6 +108,7 @@ app.get('/uploads', async (_req: Request, res: Response) => {
           .replace('thumbnails/', '')
           .replace('-thumb.jpg', '');
         return {
+          key: uuid,
           thumbnailUrl: `${R2_PUBLIC_URL}/thumbnails/${uuid}-thumb.jpg`,
           processedUrl: `${R2_PUBLIC_URL}/processed/${uuid}.jpg`,
           uploadedAt: obj.LastModified?.toISOString() ?? '',
@@ -124,6 +129,44 @@ app.get('/uploads', async (_req: Request, res: Response) => {
  * invoca la Lambda image-processor de forma síncrona (RequestResponse),
  * y devuelve el resultado con las URLs públicas en Cloudflare R2.
  */
+/**
+ * DELETE /uploads/:key
+ *
+ * Elimina del bucket R2 los dos objetos asociados al UUID:
+ *   - thumbnails/{key}-thumb.jpg
+ *   - processed/{key}.jpg
+ *
+ * Usa DeleteObjectsCommand para hacer la operación en un solo request.
+ */
+app.delete('/uploads/:key', async (req: Request, res: Response) => {
+  const { key } = req.params;
+
+  if (!key || key.trim() === '') {
+    res.status(400).json({ error: 'Falta el parámetro key' });
+    return;
+  }
+
+  try {
+    await r2Client.send(
+      new DeleteObjectsCommand({
+        Bucket: R2_BUCKET_NAME,
+        Delete: {
+          Objects: [
+            { Key: `thumbnails/${key}-thumb.jpg` },
+            { Key: `processed/${key}.jpg` },
+          ],
+          Quiet: true,
+        },
+      }),
+    );
+
+    res.json({ deleted: key });
+  } catch (err) {
+    console.error('Error eliminando objetos en R2:', err);
+    res.status(500).json({ error: 'Error al eliminar la imagen' });
+  }
+});
+
 app.post(
   '/upload',
   upload.single('image'),
