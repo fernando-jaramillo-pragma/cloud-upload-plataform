@@ -8,6 +8,7 @@ import {
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import type { ImageProcessResult, ThumbnailItem } from '@org/models';
+import { AuthService } from '../auth/auth.service';
 
 const API_URL = 'http://localhost:3000';
 

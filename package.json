@@ -4,6 +4,7 @@
   "license": "MIT",
   "scripts": {
     "dev:web": "pnpm nx serve web",
+    "dev:web:local": "pnpm nx serve web --configuration=local",
     "dev:api": "pnpm nx serve api",
     "build:web": "pnpm nx build web",
     "test:web": "pnpm nx test web",

@@ -1,3 +1,50 @@
+<header class="app-header">
+  <div class="app-header-brand">
+    <img src="svg/logo.svg" class="header-logo" alt="Cloud Photo logo" />
+    <span class="header-app-name">Cloud Photo</span>
+  </div>
+
+  @if (auth.currentUser(); as user) {
+  <div class="app-header-user">
+    @if (user.picture) {
+    <img
+      [src]="user.picture"
+      [alt]="user.name"
+      class="user-avatar"
+      referrerpolicy="no-referrer"
+    />
+    } @else {
+    <div class="user-avatar-fallback">
+      {{ (user.name || user.email)[0].toUpperCase() }}
+    </div>
+    }
+    <span class="user-name">{{ user.given_name || user.name }}</span>
+    <button
+      id="btn-logout"
+      class="btn-logout"
+      type="button"
+      (click)="auth.logout()"
+      aria-label="Cerrar sesion"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+        <polyline points="16 17 21 12 16 7" />
+        <line x1="21" y1="12" x2="9" y2="12" />
+      </svg>
+      <span>Salir</span>
+    </button>
+  </div>
+  }
+</header>
+
 <div class="upload-container">
   <!-- Alerta unica (error / success / deleted) -->
   @if (alert(); as a) {

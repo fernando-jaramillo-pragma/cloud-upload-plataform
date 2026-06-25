@@ -5,6 +5,11 @@ dist
 tmp
 out-tsc
 .env
+*.env.local
+
+# Archivos de entorno con valores reales (nunca subir al repo)
+# Usa environment.ts.local para tus valores de desarrollo personales
+web/src/environments/environment.local.ts
 
 # dependencies
 node_modules

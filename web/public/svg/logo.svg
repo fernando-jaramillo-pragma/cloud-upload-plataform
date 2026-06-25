@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 16 16">
+  <defs>
+    <linearGradient id="logoGrad" x1="0" y1="0" x2="16" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#logoGrad)" fill-rule="evenodd" d="M3 3H0v11h16V3h-3l-2-2H5zm5 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6" clip-rule="evenodd"/>
+</svg>
