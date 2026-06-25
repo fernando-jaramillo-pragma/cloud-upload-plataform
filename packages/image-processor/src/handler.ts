@@ -19,7 +19,14 @@ export const handler: Handler<ImageUploadPayload, LambdaResponse> = async (
   event,
 ) => {
   try {
-    const { imageBase64, filename, mimetype } = event;
+    const { imageBase64, filename, mimetype, userId } = event;
+
+    if (!userId) {
+      return {
+        statusCode: 400,
+        body: { error: 'Falta el parámetro userId en la invocación de Lambda' },
+      };
+    }
 
     // 1. Decodificar base64 → Buffer
     const buffer = Buffer.from(imageBase64, 'base64');
@@ -32,9 +39,9 @@ export const handler: Handler<ImageUploadPayload, LambdaResponse> = async (
         : mimetype === 'image/webp'
           ? 'webp'
           : 'jpg';
-    const originalKey = `originals/${hash}.${ext}`;
-    const processedKey = `processed/${hash}.jpg`;
-    const thumbnailKey = `thumbnails/${hash}-thumb.jpg`;
+    const originalKey = `originals/${userId}/${hash}.${ext}`;
+    const processedKey = `processed/${userId}/${hash}.jpg`;
+    const thumbnailKey = `thumbnails/${userId}/${hash}-thumb.jpg`;
 
     // 3. Si ya existe en R2, devolver las URLs sin reprocesar
     const alreadyExists = await existsInR2(processedKey);

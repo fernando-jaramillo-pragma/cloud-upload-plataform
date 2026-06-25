@@ -71,8 +71,8 @@
       "options": {
         "parallel": false,
         "commands": [
-          "echo '{\"dependencies\":{\"sharp\":\"^0.34.2\"}}' > dist/packages/image-processor/package.json",
-          "npm install --prefix dist/packages/image-processor --cpu=x64 --os=linux sharp --no-package-lock",
+          "echo '{\"dependencies\":{\"sharp\":\"0.34.5\"}}' > dist/packages/image-processor/package.json",
+          "npm install --prefix dist/packages/image-processor --cpu=x64 --os=linux sharp@0.34.5 @img/sharp-linux-x64@0.34.5 @img/sharp-libvips-linux-x64@1.2.4 --no-package-lock --force",
           "cd dist/packages/image-processor && zip -r ../image-processor.zip ."
         ]
       }

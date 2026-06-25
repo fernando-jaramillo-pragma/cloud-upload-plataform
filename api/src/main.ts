@@ -7,11 +7,16 @@ import {
   S3Client,
   ListObjectsV2Command,
   DeleteObjectsCommand,
+  GetObjectCommand,
+  PutObjectCommand,
 } from '@aws-sdk/client-s3';
+import { Readable } from 'stream';
+import { authMiddleware, AuthRequest } from './auth-middleware';
 import type {
   ImageUploadPayload,
   LambdaResponse,
   ThumbnailItem,
+  PublicIndexEntry,
 } from '@org/models';
 
 /**
@@ -41,8 +46,6 @@ app.use(express.json());
 /**
  * Configuración de Multer para manejar uploads de archivos en memoria.
  * Limitamos el tamaño máximo de los archivos para evitar abusos.
- *
- * Multer es un middleware de Express para manejar multipart/form-data, que es el tipo de contenido que se usa para subir archivos desde formularios HTML o desde el frontend. En este caso, configuramos Multer para almacenar los archivos en memoria (en un buffer) y no en el sistema de archivos del servidor, ya que luego los enviaremos directamente a la Lambda sin necesidad de guardarlos localmente.
  */
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -51,8 +54,6 @@ const upload = multer({
 
 /**
  * Configuración del cliente Lambda de AWS SDK v3.
- * Usamos las credenciales y región por defecto (p.ej., desde variables de entorno o roles de IAM si se ejecuta en AWS).
- * Este cliente se usará para invocar la función Lambda que procesa las imágenes.
  */
 const lambdaClient = new LambdaClient({
   region: process.env['AWS_REGION'] ?? 'us-east-1',
@@ -60,7 +61,6 @@ const lambdaClient = new LambdaClient({
 
 /**
  * Configuración del cliente R2 de Cloudflare (misma API que S3).
- * Usamos las credenciales y endpoint de R2 para listar y acceder a los objetos.
  */
 const r2Client = new S3Client({
   region: 'auto',
@@ -72,6 +72,56 @@ const r2Client = new S3Client({
 });
 
 /**
+ * Helper para leer el índice de fotos públicas en R2.
+ */
+async function readPublicIndex(): Promise<PublicIndexEntry[]> {
+  try {
+    const response = await r2Client.send(
+      new GetObjectCommand({
+        Bucket: R2_BUCKET_NAME,
+        Key: 'public-index.json',
+      })
+    );
+    if (!response.Body) return [];
+
+    const stream = response.Body as Readable;
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      stream.on('data', (chunk) => chunks.push(chunk));
+      stream.on('error', (err) => reject(err));
+      stream.on('end', () => {
+        try {
+          const content = Buffer.concat(chunks).toString('utf-8');
+          resolve(JSON.parse(content) as PublicIndexEntry[]);
+        } catch {
+          resolve([]);
+        }
+      });
+    });
+  } catch (err: any) {
+    if (err.name === 'NoSuchKey' || err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+      return [];
+    }
+    console.error('Error al leer el índice público de R2:', err);
+    return [];
+  }
+}
+
+/**
+ * Helper para escribir el índice de fotos públicas en R2.
+ */
+async function writePublicIndex(index: PublicIndexEntry[]): Promise<void> {
+  await r2Client.send(
+    new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: 'public-index.json',
+      Body: JSON.stringify(index, null, 2),
+      ContentType: 'application/json',
+    })
+  );
+}
+
+/**
  * GET /
  * Primera ruta de prueba para verificar que el servidor está funcionando. Devuelve un mensaje simple en formato JSON.
  */
@@ -81,96 +131,94 @@ app.get('/', (_req: Request, res: Response) => {
 
 /**
  * GET /uploads
- * Devuelve los últimos 10 thumbnails subidos a R2, ordenados por fecha desc.
+ * Devuelve los últimos 10 thumbnails del usuario autenticado subidos a R2, ordenados por fecha desc.
  */
-app.get('/uploads', async (_req: Request, res: Response) => {
+app.get('/uploads', authMiddleware as any, async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.sub;
+  if (!userId) {
+    res.status(401).json({ error: 'Usuario no identificado' });
+    return;
+  }
+
   try {
-    // Listamos los objetos en el bucket de R2 con el prefijo "thumbnails/" para obtener solo los thumbnails generados por la Lambda
-    // ListObjectsV2 responde con maximo 1000 objetos, en orden alfabético por clave.
+    // Listamos los objetos en el bucket de R2 con el prefijo del usuario
     const response = await r2Client.send(
       new ListObjectsV2Command({
         Bucket: R2_BUCKET_NAME,
-        Prefix: 'thumbnails/',
+        Prefix: `thumbnails/${userId}/`,
       }),
     );
 
-    // Procesamos la respuesta para extraer la información relevante de cada thumbnail y construir las URLs públicas tanto del thumbnail como de la imagen procesada correspondiente. También ordenamos por fecha de subida (LastModified) y limitamos a los últimos 10 items.
+    // Leer el índice público para saber cuáles de estas imágenes son públicas
+    const publicIndex = await readPublicIndex();
+    const publicKeys = new Set(
+      publicIndex.filter((p) => p.userId === userId).map((p) => p.key)
+    );
+
     const items: ThumbnailItem[] = (response.Contents ?? [])
-      .filter((obj) => obj.Key !== 'thumbnails/')
+      .filter((obj) => obj.Key !== `thumbnails/${userId}/`)
       .sort(
         (a, b) =>
           (b.LastModified?.getTime() ?? 0) - (a.LastModified?.getTime() ?? 0),
       )
       .slice(0, 10)
       .map((obj) => {
-        // Obtenemos el UUID a partir del nombre del objeto, asumiendo que sigue el formato "thumbnails/{uuid}-thumb.jpg". Esto nos permite construir las URLs tanto del thumbnail como de la imagen procesada correspondiente.
-        const uuid = (obj.Key ?? '')
-          .replace('thumbnails/', '')
-          .replace('-thumb.jpg', '');
+        const keyWithPrefix = obj.Key ?? '';
+        const parts = keyWithPrefix.split('/');
+        const filename = parts[parts.length - 1] ?? '';
+        const uuid = filename.replace('-thumb.jpg', '');
+
         return {
           key: uuid,
-          thumbnailUrl: `${R2_PUBLIC_URL}/thumbnails/${uuid}-thumb.jpg`,
-          processedUrl: `${R2_PUBLIC_URL}/processed/${uuid}.jpg`,
+          thumbnailUrl: `${R2_PUBLIC_URL}/thumbnails/${userId}/${uuid}-thumb.jpg`,
+          processedUrl: `${R2_PUBLIC_URL}/processed/${userId}/${uuid}.jpg`,
           uploadedAt: obj.LastModified?.toISOString() ?? '',
+          isPublic: publicKeys.has(uuid),
         };
       });
 
     res.json(items);
   } catch (err) {
-    console.error('Error listando R2:', err);
+    console.error('Error listando R2 para el usuario:', err);
     res.status(500).json({ error: 'Error al obtener imágenes' });
   }
 });
 
 /**
- * POST /upload
- *
- * Recibe una imagen (multipart/form-data, campo "image"),
- * invoca la Lambda image-processor de forma síncrona (RequestResponse),
- * y devuelve el resultado con las URLs públicas en Cloudflare R2.
+ * GET /uploads/public
+ * Devuelve la lista de fotos públicas de todos los usuarios.
  */
-/**
- * DELETE /uploads/:key
- *
- * Elimina del bucket R2 los dos objetos asociados al UUID:
- *   - thumbnails/{key}-thumb.jpg
- *   - processed/{key}.jpg
- *
- * Usa DeleteObjectsCommand para hacer la operación en un solo request.
- */
-app.delete('/uploads/:key', async (req: Request, res: Response) => {
-  const { key } = req.params;
-
-  if (!key || key.trim() === '') {
-    res.status(400).json({ error: 'Falta el parámetro key' });
-    return;
-  }
-
+app.get('/uploads/public', async (_req: Request, res: Response) => {
   try {
-    await r2Client.send(
-      new DeleteObjectsCommand({
-        Bucket: R2_BUCKET_NAME,
-        Delete: {
-          Objects: [
-            { Key: `thumbnails/${key}-thumb.jpg` },
-            { Key: `processed/${key}.jpg` },
-          ],
-          Quiet: true,
-        },
-      }),
+    const publicIndex = await readPublicIndex();
+    // Devolvemos el índice ordenado por fecha de publicación descendente
+    const sorted = [...publicIndex].sort(
+      (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
     );
-
-    res.json({ deleted: key });
+    res.json(sorted);
   } catch (err) {
-    console.error('Error eliminando objetos en R2:', err);
-    res.status(500).json({ error: 'Error al eliminar la imagen' });
+    console.error('Error al listar fotos públicas:', err);
+    res.status(500).json({ error: 'Error al obtener fotos públicas' });
   }
 });
 
+/**
+ * POST /upload
+ * Recibe una imagen (multipart/form-data, campo "image"),
+ * invoca la Lambda de forma síncrona pasando el userId del JWT,
+ * y devuelve el resultado con las URLs públicas en Cloudflare R2.
+ */
 app.post(
   '/upload',
+  authMiddleware as any,
   upload.single('image'),
-  async (req: Request, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
+    const userId = req.user?.sub;
+    if (!userId) {
+      res.status(401).json({ error: 'Usuario no identificado' });
+      return;
+    }
+
     if (!req.file) {
       res
         .status(400)
@@ -180,48 +228,34 @@ app.post(
 
     /**
      * Pre-comprimir la imagen antes de enviar a Lambda.
-     * Lambda tiene un límite de 6MB para invocaciones síncronas.
-     * Reducimos a max 2000px y JPEG q85 para que el payload base64 quede bajo ~4MB.
      */
     const preCompressed = await sharp(req.file.buffer)
-      .rotate() // corrige orientación EXIF (fotos iPhone rotadas)
+      .rotate()
       .resize(2000, 2000, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 85 })
       .toBuffer();
 
-    /**
-     * Construimos el payload que se enviará a la Lambda. La Lambda espera un objeto con la imagen en base64, el nombre original del archivo y su tipo MIME. Convertimos el buffer de la imagen a una cadena base64 para incluirlo en el payload JSON.
-     */
     const payload: ImageUploadPayload = {
       imageBase64: preCompressed.toString('base64'),
       filename: req.file.originalname,
       mimetype: 'image/jpeg',
+      userId: userId,
     };
 
     try {
-      /**
-       * Invocamos la función Lambda de forma síncrona usando el cliente Lambda de AWS SDK v3. 
-       * Especificamos el nombre de la función (desde variable de entorno o valor por defecto),
-       *  el tipo de invocación "RequestResponse" para esperar la respuesta, y 
-       * el payload JSON con la imagen. 
-
-       */
       const command = new InvokeCommand({
         FunctionName: process.env['LAMBDA_FUNCTION_NAME'] ?? 'image-processor',
-        InvocationType: 'RequestResponse', // Invocación síncrona — espera la respuesta
+        InvocationType: 'RequestResponse',
         Payload: JSON.stringify(payload),
       });
 
       const response = await lambdaClient.send(command);
 
-      // La respuesta de Lambda siempre tendrá un campo Payload, aunque la función haya lanzado un error. Si Payload está vacío, es un indicio de que algo salió mal en la invocación (p.ej., función no encontrada, permisos, etc.), por lo que respondemos con un error 502. Revisar en AWS CloudWatch Logs la función Lambda para más detalles sobre el error.
       if (!response.Payload) {
         res.status(502).json({ error: 'La Lambda no devolvió respuesta' });
         return;
       }
 
-      // Convertimos el payload de la respuesta de Lambda de un buffer a una cadena UTF-8. Luego, si la función Lambda lanzó un error (indicado por el campo FunctionError), parseamos el mensaje de error y respondemos con un error 502 al cliente.
-      // Si no hubo error, parseamos la respuesta JSON esperada de la Lambda (que debe incluir las URLs públicas del thumbnail y la imagen procesada) y la devolvemos al cliente con un status 200.
       const rawPayload = Buffer.from(response.Payload).toString('utf-8');
 
       if (response.FunctionError) {
@@ -237,16 +271,127 @@ app.post(
         return;
       }
 
-      // Parseamos la respuesta de la Lambda, que debe tener el formato definido en LambdaResponse (con statusCode y body). Luego respondemos al cliente con el statusCode y el body devuelto por la Lambda.
       const lambdaResponse: LambdaResponse = JSON.parse(rawPayload);
 
-      res.status(lambdaResponse.statusCode).json(lambdaResponse.body);
+      if (lambdaResponse.statusCode === 200 && 'originalKey' in lambdaResponse.body) {
+        const bodyWithPublic = {
+          ...lambdaResponse.body,
+          isPublic: false,
+        };
+        res.status(lambdaResponse.statusCode).json(bodyWithPublic);
+      } else {
+        res.status(lambdaResponse.statusCode).json(lambdaResponse.body);
+      }
     } catch (err) {
       console.error('Error invocando Lambda:', err);
       res.status(500).json({ error: 'Error al procesar la imagen' });
     }
   },
 );
+
+/**
+ * PATCH /uploads/:key/visibility
+ * Modifica si una foto del usuario autenticado es pública o no.
+ */
+app.patch(
+  '/uploads/:key/visibility',
+  authMiddleware as any,
+  async (req: AuthRequest, res: Response) => {
+    const { key } = req.params;
+    const userId = req.user?.sub;
+    const ownerName = req.user?.name || req.user?.email || 'Usuario';
+    const { isPublic } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Usuario no identificado' });
+      return;
+    }
+
+    if (typeof isPublic !== 'boolean') {
+      res.status(400).json({ error: 'Falta o es inválido el parámetro isPublic en el body' });
+      return;
+    }
+
+    try {
+      const publicIndex = await readPublicIndex();
+      const alreadyPublicIndex = publicIndex.findIndex(
+        (item) => item.key === key && item.userId === userId
+      );
+
+      if (isPublic && alreadyPublicIndex === -1) {
+        // Agregar al índice de fotos públicas
+        const newEntry: PublicIndexEntry = {
+          userId,
+          ownerName,
+          key,
+          thumbnailUrl: `${R2_PUBLIC_URL}/thumbnails/${userId}/${key}-thumb.jpg`,
+          processedUrl: `${R2_PUBLIC_URL}/processed/${userId}/${key}.jpg`,
+          publishedAt: new Date().toISOString(),
+        };
+        publicIndex.push(newEntry);
+        await writePublicIndex(publicIndex);
+      } else if (!isPublic && alreadyPublicIndex !== -1) {
+        // Quitar del índice de fotos públicas
+        publicIndex.splice(alreadyPublicIndex, 1);
+        await writePublicIndex(publicIndex);
+      }
+
+      res.json({ success: true, key, isPublic });
+    } catch (err) {
+      console.error('Error al cambiar visibilidad de imagen:', err);
+      res.status(500).json({ error: 'Error al actualizar visibilidad' });
+    }
+  }
+);
+
+/**
+ * DELETE /uploads/:key
+ * Elimina del bucket R2 los objetos asociados al UUID bajo el prefijo del usuario
+ * y los remueve del índice público si aplica.
+ */
+app.delete('/uploads/:key', authMiddleware as any, async (req: AuthRequest, res: Response) => {
+  const { key } = req.params;
+  const userId = req.user?.sub;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Usuario no identificado' });
+    return;
+  }
+
+  if (!key || key.trim() === '') {
+    res.status(400).json({ error: 'Falta el parámetro key' });
+    return;
+  }
+
+  try {
+    await r2Client.send(
+      new DeleteObjectsCommand({
+        Bucket: R2_BUCKET_NAME,
+        Delete: {
+          Objects: [
+            { Key: `thumbnails/${userId}/${key}-thumb.jpg` },
+            { Key: `processed/${userId}/${key}.jpg` },
+          ],
+          Quiet: true,
+        },
+      }),
+    );
+
+    // Eliminar también del índice público si estuviera allí
+    const publicIndex = await readPublicIndex();
+    const updatedIndex = publicIndex.filter(
+      (item) => !(item.key === key && item.userId === userId)
+    );
+    if (publicIndex.length !== updatedIndex.length) {
+      await writePublicIndex(updatedIndex);
+    }
+
+    res.json({ deleted: key });
+  } catch (err) {
+    console.error('Error eliminando objetos en R2:', err);
+    res.status(500).json({ error: 'Error al eliminar la imagen' });
+  }
+});
 
 app.listen(port, () => {
   console.log(`[ ready ] http://${host}:${port}`);

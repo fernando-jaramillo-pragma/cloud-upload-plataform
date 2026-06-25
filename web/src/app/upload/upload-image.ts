@@ -35,12 +35,23 @@ export class UploadImage implements OnInit {
   readonly isUploading = signal(false);
   readonly isLoading = signal(false);
   readonly alert = signal<Alert | null>(null);
+  
+  // Pestaña activa ('my-photos' o 'public')
+  readonly activeTab = signal<'my-photos' | 'public'>('my-photos');
+  
+  // Fotos del usuario
   readonly recentUploads = signal<ThumbnailItem[]>([]);
+  
+  // Fotos públicas de todos los usuarios
+  readonly publicUploads = signal<ThumbnailItem[]>([]);
+
   readonly modalImageUrl = signal<string | null>(null);
   readonly deletingKey = signal<string | null>(null);
+  readonly togglingKey = signal<string | null>(null);
 
   ngOnInit(): void {
     this.loadRecentUploads();
+    this.loadPublicUploads();
   }
 
   onSelectFile(event: Event): void {
@@ -89,19 +100,23 @@ export class UploadImage implements OnInit {
       formData.append('image', file);
 
       const result = await firstValueFrom(
-        this.http.post<ImageProcessResult>(`${API_URL}/upload`, formData),
+        this.http.post<ImageProcessResult & { isPublic: boolean }>(`${API_URL}/upload`, formData),
       );
+
+      // Extraer el key/uuid robustamente
+      const parts = result.thumbnailKey.split('/');
+      const filename = parts[parts.length - 1] ?? '';
+      const key = filename.replace('-thumb.jpg', '');
 
       // Agregar al inicio de la galería (máx 10) y limpiar el formulario
       this.recentUploads.update((prev) =>
         [
           {
-            key: result.thumbnailKey
-              .replace('thumbnails/', '')
-              .replace('-thumb.jpg', ''),
+            key,
             thumbnailUrl: result.thumbnailUrl,
             processedUrl: result.processedUrl,
             uploadedAt: new Date().toISOString(),
+            isPublic: false,
           },
           ...prev,
         ].slice(0, 10),
@@ -122,6 +137,15 @@ export class UploadImage implements OnInit {
     }
   }
 
+  switchTab(tab: 'my-photos' | 'public'): void {
+    this.activeTab.set(tab);
+    if (tab === 'public') {
+      this.loadPublicUploads();
+    } else {
+      this.loadRecentUploads();
+    }
+  }
+
   private async loadRecentUploads(): Promise<void> {
     try {
       const items = await firstValueFrom(
@@ -130,6 +154,55 @@ export class UploadImage implements OnInit {
       this.recentUploads.set(items);
     } catch {
       // No crítico — la galería inicia vacía si falla
+    }
+  }
+
+  async loadPublicUploads(): Promise<void> {
+    try {
+      const items = await firstValueFrom(
+        this.http.get<any[]>(`${API_URL}/uploads/public`),
+      );
+      const mapped: ThumbnailItem[] = items.map((item) => ({
+        key: item.key,
+        thumbnailUrl: item.thumbnailUrl,
+        processedUrl: item.processedUrl,
+        uploadedAt: item.publishedAt,
+        isPublic: true,
+        ownerName: item.ownerName,
+      }));
+      this.publicUploads.set(mapped);
+    } catch {
+      // No crítico
+    }
+  }
+
+  async toggleVisibility(item: ThumbnailItem): Promise<void> {
+    this.togglingKey.set(item.key);
+    this.clearAlert();
+    const newStatus = !item.isPublic;
+
+    try {
+      await firstValueFrom(
+        this.http.patch(`${API_URL}/uploads/${item.key}/visibility`, {
+          isPublic: newStatus,
+        }),
+      );
+
+      this.recentUploads.update((prev) =>
+        prev.map((i) => (i.key === item.key ? { ...i, isPublic: newStatus } : i)),
+      );
+
+      this.loadPublicUploads();
+
+      this.showAlert(
+        'success',
+        newStatus ? 'Imagen compartida públicamente' : 'Imagen configurada como privada',
+        3000,
+      );
+    } catch {
+      this.showAlert('error', 'Error al cambiar la visibilidad de la imagen');
+    } finally {
+      this.togglingKey.set(null);
     }
   }
 
@@ -180,6 +253,7 @@ export class UploadImage implements OnInit {
     try {
       await firstValueFrom(this.http.delete(`${API_URL}/uploads/${key}`));
       this.recentUploads.update((prev) => prev.filter((i) => i.key !== key));
+      this.publicUploads.update((prev) => prev.filter((i) => i.key !== key));
 
       this.showAlert(
         'deleted',
@@ -198,3 +272,4 @@ export class UploadImage implements OnInit {
     }
   }
 }
+

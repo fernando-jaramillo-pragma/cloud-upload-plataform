@@ -6,6 +6,8 @@ export interface ImageUploadPayload {
   filename: string;
   /** MIME type (image/jpeg, image/png, image/webp) */
   mimetype: string;
+  /** ID del usuario que sube la imagen (sub de Cognito) */
+  userId: string;
 }
 
 /** Resultado devuelto por la Lambda tras procesar y subir la imagen */
@@ -37,6 +39,20 @@ export interface ThumbnailItem {
   thumbnailUrl: string;
   processedUrl: string;
   uploadedAt: string;
+  /** Indica si la imagen es pública */
+  isPublic: boolean;
+  /** Nombre del propietario de la imagen (opcional) */
+  ownerName?: string;
+}
+
+/** Estructura del índice público guardado en R2 */
+export interface PublicIndexEntry {
+  userId: string;
+  ownerName: string;
+  key: string;
+  thumbnailUrl: string;
+  processedUrl: string;
+  publishedAt: string;
 }
 
 /** Wrapper que retorna la Lambda */
@@ -44,3 +60,4 @@ export interface LambdaResponse {
   statusCode: number;
   body: ImageProcessResult | { error: string };
 }
+
