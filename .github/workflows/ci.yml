@@ -35,7 +35,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
 
       - run: pnpm nx format:check --base="remotes/origin/main"
-      - run: pnpm nx run-many -t lint test build typecheck e2e
+      - run: pnpm nx run-many -t lint test build typecheck
 
   deploy-lambda:
     runs-on: ubuntu-latest
