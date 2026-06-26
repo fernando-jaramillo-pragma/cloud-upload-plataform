@@ -37,20 +37,22 @@ function getKey(header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) {
   });
 }
 
-export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): void {
+export function authMiddleware(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+): void {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'No autorizado. Falta el token de autorización.' });
+    res
+      .status(401)
+      .json({ error: 'No autorizado. Falta el token de autorización.' });
     return;
   }
 
   const token = authHeader.split(' ')[1];
 
   if (!COGNITO_USER_POOL_ID) {
-    // Si no está configurada la variable en desarrollo local, podemos simular la validación o error.
-    // Pero es mejor lanzar error para que se configure correctamente,
-    // o decodificar el token sin verificar la firma si estamos en un modo local sin Cognito real configurado
-    // (sin embargo, el plan asume que usaremos verificación JWT real).
     console.error('Falta la variable COGNITO_USER_POOL_ID.');
     res.status(500).json({ error: 'Configuración de servidor incompleta.' });
     return;
@@ -77,6 +79,6 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
         name: payload.name ?? payload.username ?? payload.email ?? 'Usuario',
       };
       next();
-    }
+    },
   );
 }
