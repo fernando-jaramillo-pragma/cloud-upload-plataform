@@ -165,15 +165,14 @@ jobs:
       - name: Package API
         run: |
           pnpm nx run api:prune
-          echo "--- Contenido de dist/api ---"
-          ls -la dist/api/
-          echo "--- package.json ---"
-          cat dist/api/package.json
           # Copiar a /tmp para aislar npm del monorepo (workspace:* en root package.json)
           cp -r dist/api /tmp/api-package
           cd /tmp/api-package
           rm -f pnpm-lock.yaml
           npm install --omit=dev
+          # Configurar nginx de EB para aceptar uploads grandes (default: 1MB)
+          mkdir -p .platform/nginx/conf.d
+          echo "client_max_body_size 20M;" > .platform/nginx/conf.d/proxy.conf
           zip -r $GITHUB_WORKSPACE/api-deploy.zip .
 
       # Obtener bucket de almacenamiento por defecto de Elastic Beanstalk
