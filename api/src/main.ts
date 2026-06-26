@@ -39,8 +39,26 @@ const UPLOAD_MAX_SIZE_MB = Number(process.env['UPLOAD_MAX_SIZE_MB'] ?? 10);
 // Configuración de Express
 const app = express();
 
-// Debemos usar CORS para permitir que el frontend (que puede estar en otro origen) acceda a esta API. En producción, es recomendable configurar CORS de forma más restrictiva (p.ej., solo permitir el origen del frontend).
-app.use(cors());
+// Configuración de CORS dinámico basado en la variable de entorno ALLOWED_ORIGINS
+const allowedOrigins = process.env['ALLOWED_ORIGINS']?.split(',') ?? [
+  'http://localhost:4200',
+];
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        allowedOrigins.indexOf(origin) !== -1 ||
+        allowedOrigins.includes('*')
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+  }),
+);
 app.use(express.json());
 
 /**
@@ -80,7 +98,7 @@ async function readPublicIndex(): Promise<PublicIndexEntry[]> {
       new GetObjectCommand({
         Bucket: R2_BUCKET_NAME,
         Key: 'public-index.json',
-      })
+      }),
     );
     if (!response.Body) return [];
 
@@ -99,7 +117,11 @@ async function readPublicIndex(): Promise<PublicIndexEntry[]> {
       });
     });
   } catch (err: any) {
-    if (err.name === 'NoSuchKey' || err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+    if (
+      err.name === 'NoSuchKey' ||
+      err.name === 'NotFound' ||
+      err.$metadata?.httpStatusCode === 404
+    ) {
       return [];
     }
     console.error('Error al leer el índice público de R2:', err);
@@ -117,7 +139,7 @@ async function writePublicIndex(index: PublicIndexEntry[]): Promise<void> {
       Key: 'public-index.json',
       Body: JSON.stringify(index, null, 2),
       ContentType: 'application/json',
-    })
+    }),
   );
 }
 
@@ -133,56 +155,60 @@ app.get('/', (_req: Request, res: Response) => {
  * GET /uploads
  * Devuelve los últimos 10 thumbnails del usuario autenticado subidos a R2, ordenados por fecha desc.
  */
-app.get('/uploads', authMiddleware as any, async (req: AuthRequest, res: Response) => {
-  const userId = req.user?.sub;
-  if (!userId) {
-    res.status(401).json({ error: 'Usuario no identificado' });
-    return;
-  }
+app.get(
+  '/uploads',
+  authMiddleware as any,
+  async (req: AuthRequest, res: Response) => {
+    const userId = req.user?.sub;
+    if (!userId) {
+      res.status(401).json({ error: 'Usuario no identificado' });
+      return;
+    }
 
-  try {
-    // Listamos los objetos en el bucket de R2 con el prefijo del usuario
-    const response = await r2Client.send(
-      new ListObjectsV2Command({
-        Bucket: R2_BUCKET_NAME,
-        Prefix: `thumbnails/${userId}/`,
-      }),
-    );
+    try {
+      // Listamos los objetos en el bucket de R2 con el prefijo del usuario
+      const response = await r2Client.send(
+        new ListObjectsV2Command({
+          Bucket: R2_BUCKET_NAME,
+          Prefix: `thumbnails/${userId}/`,
+        }),
+      );
 
-    // Leer el índice público para saber cuáles de estas imágenes son públicas
-    const publicIndex = await readPublicIndex();
-    const publicKeys = new Set(
-      publicIndex.filter((p) => p.userId === userId).map((p) => p.key)
-    );
+      // Leer el índice público para saber cuáles de estas imágenes son públicas
+      const publicIndex = await readPublicIndex();
+      const publicKeys = new Set(
+        publicIndex.filter((p) => p.userId === userId).map((p) => p.key),
+      );
 
-    const items: ThumbnailItem[] = (response.Contents ?? [])
-      .filter((obj) => obj.Key !== `thumbnails/${userId}/`)
-      .sort(
-        (a, b) =>
-          (b.LastModified?.getTime() ?? 0) - (a.LastModified?.getTime() ?? 0),
-      )
-      .slice(0, 10)
-      .map((obj) => {
-        const keyWithPrefix = obj.Key ?? '';
-        const parts = keyWithPrefix.split('/');
-        const filename = parts[parts.length - 1] ?? '';
-        const uuid = filename.replace('-thumb.jpg', '');
+      const items: ThumbnailItem[] = (response.Contents ?? [])
+        .filter((obj) => obj.Key !== `thumbnails/${userId}/`)
+        .sort(
+          (a, b) =>
+            (b.LastModified?.getTime() ?? 0) - (a.LastModified?.getTime() ?? 0),
+        )
+        .slice(0, 10)
+        .map((obj) => {
+          const keyWithPrefix = obj.Key ?? '';
+          const parts = keyWithPrefix.split('/');
+          const filename = parts[parts.length - 1] ?? '';
+          const uuid = filename.replace('-thumb.jpg', '');
 
-        return {
-          key: uuid,
-          thumbnailUrl: `${R2_PUBLIC_URL}/thumbnails/${userId}/${uuid}-thumb.jpg`,
-          processedUrl: `${R2_PUBLIC_URL}/processed/${userId}/${uuid}.jpg`,
-          uploadedAt: obj.LastModified?.toISOString() ?? '',
-          isPublic: publicKeys.has(uuid),
-        };
-      });
+          return {
+            key: uuid,
+            thumbnailUrl: `${R2_PUBLIC_URL}/thumbnails/${userId}/${uuid}-thumb.jpg`,
+            processedUrl: `${R2_PUBLIC_URL}/processed/${userId}/${uuid}.jpg`,
+            uploadedAt: obj.LastModified?.toISOString() ?? '',
+            isPublic: publicKeys.has(uuid),
+          };
+        });
 
-    res.json(items);
-  } catch (err) {
-    console.error('Error listando R2 para el usuario:', err);
-    res.status(500).json({ error: 'Error al obtener imágenes' });
-  }
-});
+      res.json(items);
+    } catch (err) {
+      console.error('Error listando R2 para el usuario:', err);
+      res.status(500).json({ error: 'Error al obtener imágenes' });
+    }
+  },
+);
 
 /**
  * GET /uploads/public
@@ -193,7 +219,8 @@ app.get('/uploads/public', async (_req: Request, res: Response) => {
     const publicIndex = await readPublicIndex();
     // Devolvemos el índice ordenado por fecha de publicación descendente
     const sorted = [...publicIndex].sort(
-      (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+      (a, b) =>
+        new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
     );
     res.json(sorted);
   } catch (err) {
@@ -273,7 +300,10 @@ app.post(
 
       const lambdaResponse: LambdaResponse = JSON.parse(rawPayload);
 
-      if (lambdaResponse.statusCode === 200 && 'originalKey' in lambdaResponse.body) {
+      if (
+        lambdaResponse.statusCode === 200 &&
+        'originalKey' in lambdaResponse.body
+      ) {
         const bodyWithPublic = {
           ...lambdaResponse.body,
           isPublic: false,
@@ -308,14 +338,18 @@ app.patch(
     }
 
     if (typeof isPublic !== 'boolean') {
-      res.status(400).json({ error: 'Falta o es inválido el parámetro isPublic en el body' });
+      res
+        .status(400)
+        .json({
+          error: 'Falta o es inválido el parámetro isPublic en el body',
+        });
       return;
     }
 
     try {
       const publicIndex = await readPublicIndex();
       const alreadyPublicIndex = publicIndex.findIndex(
-        (item) => item.key === key && item.userId === userId
+        (item) => item.key === key && item.userId === userId,
       );
 
       if (isPublic && alreadyPublicIndex === -1) {
@@ -341,57 +375,61 @@ app.patch(
       console.error('Error al cambiar visibilidad de imagen:', err);
       res.status(500).json({ error: 'Error al actualizar visibilidad' });
     }
-  }
+  },
 );
 
 /**
  * DELETE /uploads/:key
  * Elimina del bucket R2 los objetos asociados al UUID bajo el prefijo del usuario
- * y los remueve del índice público si aplica.
+  // * y los remueve del índice público si aplica.
  */
-app.delete('/uploads/:key', authMiddleware as any, async (req: AuthRequest, res: Response) => {
-  const { key } = req.params;
-  const userId = req.user?.sub;
+app.delete(
+  '/uploads/:key',
+  authMiddleware as any,
+  async (req: AuthRequest, res: Response) => {
+    const { key } = req.params;
+    const userId = req.user?.sub;
 
-  if (!userId) {
-    res.status(401).json({ error: 'Usuario no identificado' });
-    return;
-  }
-
-  if (!key || key.trim() === '') {
-    res.status(400).json({ error: 'Falta el parámetro key' });
-    return;
-  }
-
-  try {
-    await r2Client.send(
-      new DeleteObjectsCommand({
-        Bucket: R2_BUCKET_NAME,
-        Delete: {
-          Objects: [
-            { Key: `thumbnails/${userId}/${key}-thumb.jpg` },
-            { Key: `processed/${userId}/${key}.jpg` },
-          ],
-          Quiet: true,
-        },
-      }),
-    );
-
-    // Eliminar también del índice público si estuviera allí
-    const publicIndex = await readPublicIndex();
-    const updatedIndex = publicIndex.filter(
-      (item) => !(item.key === key && item.userId === userId)
-    );
-    if (publicIndex.length !== updatedIndex.length) {
-      await writePublicIndex(updatedIndex);
+    if (!userId) {
+      res.status(401).json({ error: 'Usuario no identificado' });
+      return;
     }
 
-    res.json({ deleted: key });
-  } catch (err) {
-    console.error('Error eliminando objetos en R2:', err);
-    res.status(500).json({ error: 'Error al eliminar la imagen' });
-  }
-});
+    if (!key || key.trim() === '') {
+      res.status(400).json({ error: 'Falta el parámetro key' });
+      return;
+    }
+
+    try {
+      await r2Client.send(
+        new DeleteObjectsCommand({
+          Bucket: R2_BUCKET_NAME,
+          Delete: {
+            Objects: [
+              { Key: `thumbnails/${userId}/${key}-thumb.jpg` },
+              { Key: `processed/${userId}/${key}.jpg` },
+            ],
+            Quiet: true,
+          },
+        }),
+      );
+
+      // Eliminar también del índice público si estuviera allí
+      const publicIndex = await readPublicIndex();
+      const updatedIndex = publicIndex.filter(
+        (item) => !(item.key === key && item.userId === userId),
+      );
+      if (publicIndex.length !== updatedIndex.length) {
+        await writePublicIndex(updatedIndex);
+      }
+
+      res.json({ deleted: key });
+    } catch (err) {
+      console.error('Error eliminando objetos en R2:', err);
+      res.status(500).json({ error: 'Error al eliminar la imagen' });
+    }
+  },
+);
 
 app.listen(port, () => {
   console.log(`[ ready ] http://${host}:${port}`);

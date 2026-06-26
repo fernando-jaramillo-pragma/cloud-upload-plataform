@@ -1,5 +1,6 @@
 export const environment = {
   production: true,
+  apiUrl: '#{API_URL}#',
   cognito: {
     region: '#{COGNITO_REGION}#',
     userPoolId: '#{COGNITO_USER_POOL_ID}#',
@@ -10,3 +11,4 @@ export const environment = {
     scopes: ['openid', 'email', 'profile'],
   },
 };
+

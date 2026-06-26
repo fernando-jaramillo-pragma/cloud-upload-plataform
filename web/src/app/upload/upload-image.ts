@@ -9,8 +9,9 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import type { ImageProcessResult, ThumbnailItem } from '@org/models';
 import { AuthService } from '../auth/auth.service';
+import { environment } from '../../environments/environment';
 
-const API_URL = 'http://localhost:3000';
+const API_URL = environment.apiUrl;
 
 type AlertType = 'error' | 'success' | 'deleted';
 

@@ -77,3 +77,126 @@ jobs:
             --zip-file fileb://dist/packages/image-processor.zip \
             --query '{FunctionName: FunctionName, CodeSize: CodeSize, LastModified: LastModified, CodeSha256: CodeSha256}' \
             --output table
+
+  deploy-web:
+    runs-on: ubuntu-latest
+    needs: main
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Configurar credenciales AWS via OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Reemplazar placeholders en el environment de producción con valores de Secrets
+      - name: Inject Production Settings
+        run: |
+          sed -i 's|#{API_URL}#|${{ secrets.API_URL }}|g' web/src/environments/environment.prod.ts
+          sed -i 's|#{COGNITO_REGION}#|${{ secrets.COGNITO_REGION }}|g' web/src/environments/environment.prod.ts
+          sed -i 's|#{COGNITO_USER_POOL_ID}#|${{ secrets.COGNITO_USER_POOL_ID }}|g' web/src/environments/environment.prod.ts
+          sed -i 's|#{COGNITO_CLIENT_ID}#|${{ secrets.COGNITO_CLIENT_ID }}|g' web/src/environments/environment.prod.ts
+          sed -i 's|#{COGNITO_DOMAIN}#|${{ secrets.COGNITO_DOMAIN }}|g' web/src/environments/environment.prod.ts
+          sed -i 's|#{APP_REDIRECT_URI}#|${{ secrets.APP_REDIRECT_URI }}|g' web/src/environments/environment.prod.ts
+          sed -i 's|#{APP_LOGOUT_URI}#|${{ secrets.APP_LOGOUT_URI }}|g' web/src/environments/environment.prod.ts
+
+      # Build de la SPA Angular
+      - name: Build Web Application
+        run: pnpm nx build web --configuration=production
+
+      # Desplegar en S3
+      - name: Deploy to S3
+        run: |
+          aws s3 sync dist/web/browser/ s3://${{ secrets.S3_BUCKET_WEB }} --delete
+
+      # Invalidar cache de CloudFront para reflejar cambios
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+  deploy-api:
+    runs-on: ubuntu-latest
+    needs: main
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Configurar credenciales AWS via OIDC
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Build y empaquetado de la API
+      - name: Package API
+        run: |
+          pnpm nx run api:build --configuration=production
+          pnpm nx run api:prune-lockfile
+          pnpm nx run api:copy-workspace-modules
+          cd dist/api
+          # Instalar dependencias de producción
+          pnpm install --prod --no-frozen-lockfile
+          # Crear zip para Elastic Beanstalk
+          zip -r ../../api-deploy.zip .
+
+      # Obtener bucket de almacenamiento por defecto de Elastic Beanstalk
+      - name: Get Elastic Beanstalk S3 Storage Bucket
+        id: eb-bucket
+        run: |
+          BUCKET=$(aws elasticbeanstalk create-storage-location --query "S3Bucket" --output text)
+          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+
+      # Subir versión del código a S3 de Elastic Beanstalk
+      - name: Upload code version to S3
+        run: |
+          aws s3 cp api-deploy.zip s3://${{ steps.eb-bucket.outputs.bucket }}/api-deploy-${{ github.sha }}.zip
+
+      # Crear versión de aplicación en Elastic Beanstalk
+      - name: Create Elastic Beanstalk Application Version
+        run: |
+          aws elasticbeanstalk create-application-version \
+            --application-name "${{ secrets.EB_APP_NAME }}" \
+            --version-label "release-${{ github.sha }}" \
+            --source-bundle S3Bucket="${{ steps.eb-bucket.outputs.bucket }}",S3Key="api-deploy-${{ github.sha }}.zip" \
+            --description "Release ${{ github.sha }} from GitHub Actions"
+
+      # Desplegar la versión en el entorno
+      - name: Deploy to Elastic Beanstalk Environment
+        run: |
+          aws elasticbeanstalk update-environment \
+            --environment-name "${{ secrets.EB_ENV_NAME }}" \
+            --version-label "release-${{ github.sha }}"
