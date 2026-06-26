@@ -167,13 +167,12 @@ jobs:
           pnpm nx run api:build --configuration=production
           pnpm nx run api:prune-lockfile
           pnpm nx run api:copy-workspace-modules
-          cd dist/api
-          # Eliminar pnpm-lock para que EB no intente usar pnpm
+          # Copiar a /tmp para aislar npm del monorepo (workspace:* en root package.json)
+          cp -r dist/api /tmp/api-package
+          cd /tmp/api-package
           rm -f pnpm-lock.yaml
-          # Instalar dependencias con npm (genera node_modules correctamente)
           npm install --omit=dev
-          # Crear zip con todo incluido para Elastic Beanstalk
-          zip -r ../../api-deploy.zip .
+          zip -r $GITHUB_WORKSPACE/api-deploy.zip .
 
       # Obtener bucket de almacenamiento por defecto de Elastic Beanstalk
       - name: Get Elastic Beanstalk S3 Storage Bucket
