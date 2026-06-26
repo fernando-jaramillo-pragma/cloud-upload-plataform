@@ -39,17 +39,18 @@ const UPLOAD_MAX_SIZE_MB = Number(process.env['UPLOAD_MAX_SIZE_MB'] ?? 10);
 // Configuración de Express
 const app = express();
 
-// Configuración de CORS dinámico basado en la variable de entorno ALLOWED_ORIGINS
-const allowedOrigins = process.env['ALLOWED_ORIGINS']?.split(',') ?? [
-  'http://localhost:4200',
-];
+// Configuración de CORS dinámico con tolerancia a espacios y soporte automático para CloudFront/Localhost
 app.use(
   cors({
     origin: (origin, callback) => {
+      const allowedOrigins = process.env['ALLOWED_ORIGINS']?.split(',').map(o => o.trim()) ?? ['http://localhost:4200'];
+      
       if (
         !origin ||
         allowedOrigins.indexOf(origin) !== -1 ||
-        allowedOrigins.includes('*')
+        allowedOrigins.includes('*') ||
+        origin.indexOf('cloudfront.net') !== -1 ||
+        origin.indexOf('localhost') !== -1
       ) {
         callback(null, true);
       } else {
