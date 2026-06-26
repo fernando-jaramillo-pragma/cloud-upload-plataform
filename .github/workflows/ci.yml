@@ -164,9 +164,11 @@ jobs:
       # Build y empaquetado de la API
       - name: Package API
         run: |
-          pnpm nx run api:build --configuration=production
-          pnpm nx run api:prune-lockfile
-          pnpm nx run api:copy-workspace-modules
+          pnpm nx run api:prune
+          echo "--- Contenido de dist/api ---"
+          ls -la dist/api/
+          echo "--- package.json ---"
+          cat dist/api/package.json
           # Copiar a /tmp para aislar npm del monorepo (workspace:* en root package.json)
           cp -r dist/api /tmp/api-package
           cd /tmp/api-package
